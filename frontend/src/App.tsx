@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type SectionFeedback = {
   title: string;
@@ -33,7 +33,19 @@ type AnalysisSummary = {
   missing_count: number;
 };
 
+type AuthResponse = {
+  access_token: string;
+  token_type: string;
+  username: string;
+};
+
+type CurrentUserResponse = {
+  username: string;
+};
+
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+const TOKEN_STORAGE_KEY = 'ai_resume_analyzer_token';
+const USER_STORAGE_KEY = 'ai_resume_analyzer_username';
 
 function SectionCard({ title, items }: SectionFeedback) {
   return (
@@ -60,16 +72,37 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 }
 
 function App() {
+  const storedToken = useMemo(() => localStorage.getItem(TOKEN_STORAGE_KEY), []);
+  const storedUsername = useMemo(() => localStorage.getItem(USER_STORAGE_KEY), []);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [jdFile, setJdFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [history, setHistory] = useState<AnalysisSummary[]>([]);
+  const [authToken, setAuthToken] = useState<string | null>(storedToken);
+  const [username, setUsername] = useState<string>(storedUsername ?? '');
+  const [password, setPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
+    const headers = new Headers(init.headers);
+    if (authToken) {
+      headers.set('Authorization', `Bearer ${authToken}`);
+    }
+
+    return fetch(input, { ...init, headers });
+  }
 
   async function loadHistory() {
+    if (!authToken) {
+      setHistory([]);
+      return;
+    }
+
     try {
-      const response = await fetch(`${API_URL}/api/analyses?limit=6`);
+      const response = await fetchWithAuth(`${API_URL}/api/analyses?limit=6`);
       if (!response.ok) {
         return;
       }
@@ -83,7 +116,66 @@ function App() {
 
   useEffect(() => {
     void loadHistory();
-  }, []);
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!authToken) {
+      return;
+    }
+
+    fetchWithAuth(`${API_URL}/api/auth/me`).then(async (response) => {
+      if (!response.ok) {
+        return;
+      }
+
+      const data = (await response.json()) as CurrentUserResponse;
+      setUsername(data.username);
+      localStorage.setItem(USER_STORAGE_KEY, data.username);
+    });
+  }, [authToken]);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!username.trim() || !password.trim()) {
+      setAuthError('Enter a username and password.');
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Login failed.');
+      }
+
+      const data = (await response.json()) as AuthResponse;
+      setAuthToken(data.access_token);
+      localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token);
+      localStorage.setItem(USER_STORAGE_KEY, data.username);
+      setUsername(data.username);
+      setPassword('');
+    } catch (loginError) {
+      setAuthError(loginError instanceof Error ? loginError.message : 'Unable to sign in.');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    setAuthToken(null);
+    setHistory([]);
+    setResult(null);
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(USER_STORAGE_KEY);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -102,12 +194,16 @@ function App() {
       formData.append('resume', resumeFile);
       formData.append('job_description', jdFile);
 
-      const response = await fetch(`${API_URL}/api/analyze`, {
+      const response = await fetchWithAuth(`${API_URL}/api/analyze`, {
         method: 'POST',
         body: formData,
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Please sign in before running an analysis.');
+        }
+
         throw new Error('Analysis request failed.');
       }
 
@@ -146,6 +242,84 @@ function App() {
             <MetricPill label="Vector Store" value="FAISS first, Chroma next" />
           </div>
         </header>
+
+        <section className="grid gap-6 lg:grid-cols-[0.88fr_1.12fr]">
+          <form
+            onSubmit={handleLogin}
+            className="rounded-[2rem] border border-white/10 bg-slate-950/40 p-6 shadow-soft backdrop-blur-xl"
+          >
+            <h2 className="text-xl font-semibold text-white">Sign in to save history</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              This is a local MVP login. It creates your account on first sign in and keeps your analysis history private by username.
+            </p>
+
+            <div className="mt-6 space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium text-cyan-100">Username</span>
+                <input
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-300"
+                  placeholder="your name or email"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-cyan-100">Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-300"
+                  placeholder="choose a private password"
+                />
+              </label>
+            </div>
+
+            {authError ? (
+              <p className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                {authError}
+              </p>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {authLoading ? 'Signing in...' : authToken ? 'Switch account' : 'Sign in / create account'}
+            </button>
+
+            {authToken ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                Log out
+              </button>
+            ) : null}
+          </form>
+
+          <div className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-soft backdrop-blur-xl">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-sm uppercase tracking-[0.25em] text-slate-400">Current session</p>
+                <h2 className="mt-2 text-xl font-semibold text-white">{authToken ? `Signed in as ${username}` : 'Not signed in'}</h2>
+              </div>
+              <div className="rounded-3xl border border-white/10 bg-slate-950/40 px-4 py-3 text-right">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Saved runs</p>
+                <p className="mt-1 text-3xl font-black text-cyan-300">{history.length}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <MetricPill label="Private history" value={authToken ? 'Enabled' : 'Locked'} />
+              <MetricPill label="Login" value={authToken ? 'Ready' : 'Required'} />
+              <MetricPill label="Sharing" value="Local MVP only" />
+            </div>
+          </div>
+        </section>
 
         <section className="grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
           <form

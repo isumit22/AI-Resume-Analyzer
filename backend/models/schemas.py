@@ -33,3 +33,18 @@ class AnalysisSummary(BaseModel):
     matched_count: int
     missing_count: int
 
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    username: str
+
+
+class CurrentUserResponse(BaseModel):
+    username: str
+

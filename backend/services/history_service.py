@@ -24,6 +24,7 @@ def initialize_history_store() -> None:
             """
             CREATE TABLE IF NOT EXISTS analyses (
                 analysis_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
                 resume_filename TEXT NOT NULL,
                 job_description_filename TEXT NOT NULL,
@@ -41,10 +42,13 @@ def initialize_history_store() -> None:
             )
             """
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analyses_user_created_at ON analyses(user_id, created_at DESC)"
+        )
         connection.commit()
 
 
-def save_analysis(analysis: AnalysisResponse) -> AnalysisResponse:
+def save_analysis(analysis: AnalysisResponse, *, user_id: int) -> AnalysisResponse:
     initialize_history_store()
 
     analysis_id = analysis.analysis_id or datetime.now(timezone.utc).strftime("ana-%Y%m%d%H%M%S%f")
@@ -57,6 +61,7 @@ def save_analysis(analysis: AnalysisResponse) -> AnalysisResponse:
             """
             INSERT OR REPLACE INTO analyses (
                 analysis_id,
+                user_id,
                 created_at,
                 resume_filename,
                 job_description_filename,
@@ -75,6 +80,7 @@ def save_analysis(analysis: AnalysisResponse) -> AnalysisResponse:
             """,
             (
                 payload.analysis_id,
+                user_id,
                 payload.created_at,
                 payload.resume_filename,
                 payload.job_description_filename,
@@ -96,7 +102,7 @@ def save_analysis(analysis: AnalysisResponse) -> AnalysisResponse:
     return payload
 
 
-def list_recent_analyses(limit: int = 10) -> list[AnalysisSummary]:
+def list_recent_analyses(*, user_id: int, limit: int = 10) -> list[AnalysisSummary]:
     initialize_history_store()
 
     with _connect() as connection:
@@ -104,10 +110,11 @@ def list_recent_analyses(limit: int = 10) -> list[AnalysisSummary]:
             """
             SELECT analysis_id, created_at, resume_filename, job_description_filename, ats_score, matched_keywords, missing_keywords
             FROM analyses
+            WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (limit,),
+            (user_id, limit),
         ).fetchall()
 
     analyses: list[AnalysisSummary] = []
@@ -127,7 +134,7 @@ def list_recent_analyses(limit: int = 10) -> list[AnalysisSummary]:
     return analyses
 
 
-def get_analysis(analysis_id: str) -> AnalysisResponse | None:
+def get_analysis(*, analysis_id: str, user_id: int) -> AnalysisResponse | None:
     initialize_history_store()
 
     with _connect() as connection:
@@ -135,9 +142,9 @@ def get_analysis(analysis_id: str) -> AnalysisResponse | None:
             """
             SELECT *
             FROM analyses
-            WHERE analysis_id = ?
+            WHERE analysis_id = ? AND user_id = ?
             """,
-            (analysis_id,),
+            (analysis_id, user_id),
         ).fetchone()
 
     if row is None:
@@ -160,6 +167,13 @@ def get_analysis(analysis_id: str) -> AnalysisResponse | None:
         learning_roadmap=payload_section(row["learning_roadmap"]),
         recruiter_feedback=row["recruiter_feedback"],
     )
+
+
+def remove_user_history(user_id: int) -> None:
+    initialize_history_store()
+    with _connect() as connection:
+        connection.execute("DELETE FROM analyses WHERE user_id = ?", (user_id,))
+        connection.commit()
 
 
 def payload_section(raw_json: str):

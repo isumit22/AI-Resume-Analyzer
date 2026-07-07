@@ -8,5 +8,7 @@ numpy
 faiss-cpu
 sentence-transformers
 google-generativeai
+python-jose[cryptography]
+passlib[bcrypt]
 
 

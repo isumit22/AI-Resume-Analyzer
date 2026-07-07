@@ -18,6 +18,7 @@ FastAPI + React MVP that compares a resume PDF against a job description and ret
 
 ## What It Does Now
 
+- Lets a user sign in locally and keeps analysis history private by username.
 - Uploads two PDFs and extracts text from both.
 - Breaks the documents into chunks and retrieves the most relevant sections.
 - Produces ATS scoring, missing keywords, strengths, weaknesses, and roadmap suggestions.
@@ -27,13 +28,22 @@ FastAPI + React MVP that compares a resume PDF against a job description and ret
 ## What It Is Not Yet
 
 - It is not a full production SaaS.
-- It does not yet have user accounts, hosted persistence, or background job processing.
+- It does not yet have hosted authentication, password reset, or background job processing.
 - It is an MVP with a real working pipeline, not a finished commercial product.
+
+## Role Alignment
+
+- Built with Python and FastAPI for backend workflows.
+- Uses a RAG-style retrieval pipeline with FAISS.
+- Demonstrates agent-style decomposition for parsing, gap analysis, scoring, and learning guidance.
+- Uses Gemini when available and keeps a fallback path for reliability.
+- Includes a deployed-ready container setup and local history tracking.
+- Designed to be easy to explain as a builder-focused GenAI project for AI/ML internship and junior engineer applications.
 
 ## Notes for Reviewers
 
 - The project is intentionally honest about its current scope.
-- The UI and README describe the app as an MVP with a real pipeline and local history.
+- The UI and README describe the app as an MVP with a real pipeline, local sign-in, and private history.
 - Dockerfiles are available at [backend/Dockerfile](backend/Dockerfile) and [frontend/Dockerfile](frontend/Dockerfile).
 - The frontend image accepts `VITE_API_URL` as a build argument.
 - Use the generated plan in [.azure/containerization-plan.copilotmd](.azure/containerization-plan.copilotmd) if you want to continue toward Azure deployment.
